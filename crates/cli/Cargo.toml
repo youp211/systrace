@@ -1,0 +1,17 @@
+[package]
+name = "sysmon-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sysmon"
+path = "src/main.rs"
+
+[dependencies]
+sysmon-core.workspace = true
+sysmon-modules.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
