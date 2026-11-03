@@ -23,7 +23,10 @@ fn registry() -> Vec<(String, String)> {
 
 /// Feature names in Cargo.toml's `[features]` table, and the `default` list.
 fn features() -> (Vec<String>, Vec<String>) {
-    let text = fs::read_to_string(root().join("Cargo.toml")).unwrap_or_default();
+    // CRLF-safe, in case a checkout converted line endings.
+    let text = fs::read_to_string(root().join("Cargo.toml"))
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     let table = text
         .split("\n[features]\n")
         .nth(1)
