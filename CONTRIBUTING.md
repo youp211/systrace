@@ -1,40 +1,64 @@
 # Contributing to systrace
 
+Read [PLAN.md](PLAN.md) first for scope and architecture.
+
 ## Scope rules
 
-- **Read-only.** No code may change system, OS, network or app state. That means no process control, no setting changes, no config edits and no packet injection. systrace only writes its own config, baselines, recordings and exports. PRs that add a system write are out of scope.
+- **Read-only.** No code may change system, OS, network or app state: no process control, no setting changes, no config edits, no packet injection. systrace writes only its own config, baselines, recordings and exports. PRs that add a system write are out of scope.
 - **General computing only.** No app- or game-specific integrations.
-- **No root by default.** Features that need privileges must degrade cleanly, and `probe()` must explain what's needed.
+- **No root by default.** Features that need privileges degrade cleanly, and `probe()` explains what's needed.
 
 ## Architecture rules
 
-- Modules read the OS and push raw numbers. They never format values or draw UI.
-- Front ends never touch the OS.
-- **Second use → extract.** When a function is needed a second time, move it to `systrace_core::util` (or `systrace_core::platform` if OS-specific). Don't abstract before that.
-- **One way to do each thing:** one formatter (`core::fmt`), one exporter (`core::export`), one selector matcher, one rate calculator.
-- Modules are plain structs in a static registry. No dynamic loading and no async runtime.
-- Adding a module should touch only its own folder, its feature in `crates/modules/Cargo.toml` and its registry lines. If it needs changes to core or a front end, fix the abstraction.
+- **Modules read the OS and push values.** They never format values or draw UI.
+- **Front ends never touch the OS.**
+- **Modules convert, core stores.** A module pushes values in the unit its `MetricDesc` declares. Core stores them exactly as pushed.
+- **Layers inside the crate.** Core (everything in `src/` outside `modules/`, `tui/` and `gui/`) uses no module or front end. Modules use only `crate::prelude`, `crate::util` and `crate::platform`. Front ends use core but never `platform` or `modules`. `tests/boundaries.rs` enforces this.
+- **Second use → extract.** When a function is needed a second time, move it to `crate::util`, or to `crate::platform::<os>` if it is OS-specific. Don't abstract before that.
+- **One way to do each thing:** one formatter (`core::fmt`), one exporter (`core::export`), one selector matcher (`util::select`), one rate calculator (`util::rate`), one panel layout (`core::layout`).
+- **All `unsafe` lives in `core::platform`,** behind safe functions with a `SAFETY:` comment on every block.
+- **Read APIs directly.** Don't shell out to tools like `vm_stat` or `powermetrics` for sampled metrics. Starting a process every tick costs too much, text formats change between OS releases, and some tools need root. Running a tool is fine for one-shot reads such as settings; start it directly, never through a shell.
+- **Static registry.** Modules are plain structs compiled in through cargo features. No dynamic loading and no async runtime.
+- **Plug and play.** Adding a module touches only its own file in `src/modules/`, its feature in `Cargo.toml` and its line in `modules!`. CI builds every module alone, so a module must not depend on another being compiled in. If a module needs a change to core or a front end, fix the abstraction.
 
-## Style
+## Module rules
 
 **Structure**
-- Each module file opens with a `//!` comment: what it reads, followed by `Read-only.`
-- OS access only happens in `probe()` and `sample()`. Parsing goes in small pure functions that are tested with fixture strings.
-- Metric IDs are `const`s at the top of the file, written as dotted lowercase: `module.subject.metric`.
-- Use `#[cfg]` at file or registration level. `cfg!()` is only allowed inside `probe()` for availability decisions.
+- The file opens with a `//!` comment saying what it reads, then `Read-only.`
+- `pub const HEADER: Header` follows the imports: `id`, `name` and what it `reads`. `header()` returns `&HEADER`.
+- Metric IDs are `const`s near the top, dotted lowercase `module.subject.metric`, where `module` is `HEADER.id`. Build IDs from OS-provided names with `util::id::segments`.
+- OS access happens only in `probe()` and `sample()`. Parsing goes in small pure functions tested against fixture strings.
+- Use `#[cfg]` at file or registration level. `cfg!()` is only for availability decisions inside `probe()`.
 - Files over about 300 lines get split (`mod.rs`, `parse.rs`, `platform_*.rs`).
+
+**Values**
+- Push base units: bytes (not pages or KiB), Hz (not MHz), °C, percent 0–100.
+- Counters: keep a `util::rate::Rates` in the module and push `rates.update(&id, total, ctx.now)` when it returns a rate. On the first total or a counter reset it returns `None`, so push nothing.
+- A module that lists devices (disks, interfaces, sensors) fixes the list in `probe()`. If it finds none, it reports its module-level ID (for example `disk`) as unavailable, so `doctor` can explain why.
 
 **Errors**
 - No `unwrap()` or `expect()` outside tests.
-- `sample()` never panics and never logs every tick. Missing data means you skip the push, and core records the gap.
-- Errors that need explaining belong in `probe()`, as an `Availability` with a reason and a fix hint.
+- `sample()` never panics and never logs per tick. Missing data means skipping the push; the store records the gap.
+- Anything that needs explaining belongs in `probe()`, as an `Availability` with a reason and, where one exists, a fix.
 
 **Comments**
-- Doc comments are a short title only. Input formats live in test fixtures.
+- Doc comments are a short title. Input formats live in test fixtures.
 - No commented-out code and no `TODO` without an issue link.
 
-**Tooling**
-- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` must pass.
+## Checks
+
+These must pass; CI runs them on macOS, Linux and Windows:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test                                                                # includes conformance and boundaries
+cargo clippy --no-default-features --all-targets -- -D warnings           # core + CLI alone
+cargo run --no-default-features --example plumbing                        # core alone, end to end
+cargo clippy --no-default-features --features <feature> --all-targets -- -D warnings   # each module or front end alone
+```
+
+The MSRV is 1.85, so no let-chains (`if let … && …`).
 
 ## Example module
 
@@ -42,8 +66,13 @@
 //! Linux pressure stall information (PSI) for memory.
 //! Read-only: parses /proc/pressure/memory.
 
-use systrace_core::platform::linux::read_to_string;
-use systrace_core::prelude::*;
+use crate::prelude::*;
+
+pub const HEADER: Header = Header {
+    id: "psi",
+    name: "Pressure stall",
+    reads: "/proc/pressure/memory",
+};
 
 const PATH: &str = "/proc/pressure/memory";
 
@@ -54,12 +83,12 @@ const FULL: MetricId = MetricId::new("psi.memory.full");
 pub struct PsiMemory;
 
 impl Module for PsiMemory {
-    fn id(&self) -> &'static str {
-        "psi"
+    fn header(&self) -> &'static Header {
+        &HEADER
     }
 
     fn probe(&mut self, _ctx: &Ctx) -> Capabilities {
-        let status = match read_to_string(PATH) {
+        let status = match std::fs::read_to_string(PATH) {
             Ok(_) => Availability::Available,
             Err(e) => Availability::unavailable(
                 format!("cannot read {PATH}: {e}"),
@@ -77,9 +106,10 @@ impl Module for PsiMemory {
     }
 
     fn sample(&mut self, _ctx: &Ctx, out: &mut Sink) {
-        // A failed read is a gap, not an error; core marks missing samples.
-        let Ok(text) = read_to_string(PATH) else { return };
-
+        // A failed read is a gap, not an error; the store records it.
+        let Ok(text) = std::fs::read_to_string(PATH) else {
+            return;
+        };
         for (kind, id) in [("some", SOME), ("full", FULL)] {
             if let Some(v) = parse_avg10(&text, kind) {
                 out.push(id, v);
@@ -88,10 +118,12 @@ impl Module for PsiMemory {
     }
 
     fn panels(&self) -> Vec<Panel> {
-        vec![Panel::new("psi.memory", "Memory pressure")
-            .priority(60)
-            .widget(Widget::series("some", SOME))
-            .widget(Widget::series("full", FULL))]
+        vec![
+            Panel::new("psi", "Pressure stall")
+                .priority(60)
+                .widget(Widget::series("memory some", SOME))
+                .widget(Widget::series("memory full", FULL)),
+        ]
     }
 }
 
@@ -121,20 +153,23 @@ mod tests {
 }
 ```
 
-Registration, in `crates/modules/Cargo.toml` and `crates/modules/src/lib.rs`:
+## Registering a module
+
+Save the module as `src/modules/psi.rs`. In `Cargo.toml`, add a feature and list it in `default`. Dependencies only one OS needs go in a `[target.'cfg(...)'.dependencies]` table with `optional = true`:
 
 ```toml
 [features]
-default = ["cpu", "psi"]
+default = ["cpu", "psi", "tui", "gui"]
 psi = []
 ```
 
-```rust
-#[cfg(all(feature = "psi", target_os = "linux"))]
-mod psi;
+In `src/modules/mod.rs`, add one line to `modules!`. The type must implement `Default`; `if "<os>"` makes the feature a no-op on other OSes:
 
-#[cfg(all(feature = "psi", target_os = "linux"))]
-reg.push(Box::new(psi::PsiMemory::default()));
+```rust
+modules! {
+    "cpu" => cpu::Cpu;
+    "psi" => psi::PsiMemory if "linux";
+}
 ```
 
-Every module gets a feature and is listed in `default`. OS-specific modules also gate on `target_os`, so the feature is a no-op on other OSes. Their dependencies go in a `[target.'cfg(...)'.dependencies]` table as `optional = true`.
+The line declares the file and registers the module under the same `cfg`. `tests/conformance.rs` and `tests/boundaries.rs` then check it along with every other module.

@@ -17,11 +17,32 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: GUI system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
-      - run: cargo fmt --all --check
+      - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
-      - run: cargo clippy -p systrace-cli --no-default-features --all-targets -- -D warnings
+
+      # Core + CLI with nothing else, and the plumbing check that drives it end to end.
+      - name: Core alone
+        run: |
+          cargo clippy --no-default-features --all-targets -- -D warnings
+          cargo test --no-default-features
+          cargo run -q --no-default-features --example plumbing
+
+      # Plug and play: every module and front end builds on the core by itself.
+      - name: Each feature alone
+        shell: bash
+        run: |
+          features=$(cargo metadata --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "systrace") | .features | keys[] | select(. != "default")')
+          for f in $features; do
+            echo "::group::$f"
+            cargo clippy --no-default-features --features "$f" --all-targets -- -D warnings
+            echo "::endgroup::"
+          done
 
       - name: Smoke test
         run: |
