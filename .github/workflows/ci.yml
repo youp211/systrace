@@ -21,6 +21,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      - run: cargo clippy -p systrace-cli --no-default-features --all-targets -- -D warnings
 
       - name: Smoke test
         run: |

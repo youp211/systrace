@@ -1,37 +1,39 @@
-//! Phase 0 commands: doctor, modules, metrics, snapshot.
+//! CLI commands: tui, doctor, modules, metrics, snapshot.
 
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
-use sysmon_core::export::{self, Format, Record};
-use sysmon_core::fmt;
-use sysmon_core::host::Host;
-use sysmon_core::metric::{Availability, Unit};
-use sysmon_core::util::select;
+use systrace_core::export::{self, Format, Record};
+use systrace_core::fmt;
+use systrace_core::host::Host;
+use systrace_core::metric::{Availability, Unit};
+use systrace_core::util::select;
 
-pub fn doctor(format: Format) -> io::Result<()> {
+pub fn doctor(problems: bool, format: Format) -> io::Result<()> {
     let host = host();
     let rows: Vec<DoctorRow> = host
         .capabilities()
         .flat_map(|(module, caps)| {
-            caps.iter().map(move |(id, status)| {
-                let (reason, fix) = match status {
-                    Availability::Available => (None, None),
-                    Availability::Degraded { reason } => (Some(reason.clone()), None),
-                    Availability::Unavailable { reason, fix } => {
-                        (Some(reason.clone()), fix.clone())
+            caps.iter()
+                .filter(move |(_, status)| !problems || **status != Availability::Available)
+                .map(move |(id, status)| {
+                    let (reason, fix) = match status {
+                        Availability::Available => (None, None),
+                        Availability::Degraded { reason } => (Some(reason.clone()), None),
+                        Availability::Unavailable { reason, fix } => {
+                            (Some(reason.clone()), fix.clone())
+                        }
+                    };
+                    DoctorRow {
+                        module,
+                        metric: id.to_string(),
+                        status: status.label(),
+                        reason,
+                        fix,
                     }
-                };
-                DoctorRow {
-                    module,
-                    metric: id.to_string(),
-                    status: status.label(),
-                    reason,
-                    fix,
-                }
-            })
+                })
         })
         .collect();
     print(&rows, format)
@@ -93,8 +95,12 @@ pub fn snapshot(selectors: &[String], interval: Duration, format: Format) -> io:
     print(&rows, format)
 }
 
+pub fn tui(interval: Duration) -> io::Result<()> {
+    systrace_tui::run(host(), interval)
+}
+
 fn host() -> Host {
-    Host::new(sysmon_modules::all())
+    Host::new(systrace_modules::all())
 }
 
 fn print<R: Record>(rows: &[R], format: Format) -> io::Result<()> {

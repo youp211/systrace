@@ -79,7 +79,10 @@ pub enum Unit {
     Bytes,
     BytesPerSec,
     Hertz,
+    Celsius,
     Count,
+    /// Events per second, e.g. a counter of pages or packets.
+    PerSec,
     Number,
 }
 

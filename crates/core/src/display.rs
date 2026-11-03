@@ -23,6 +23,12 @@ impl Widget {
         }
     }
 
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Gauge { label, .. } | Self::Series { label, .. } => label,
+        }
+    }
+
     pub fn metric(&self) -> &MetricId {
         match self {
             Self::Gauge { metric, .. } | Self::Series { metric, .. } => metric,

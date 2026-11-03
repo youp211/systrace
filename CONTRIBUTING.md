@@ -1,8 +1,8 @@
-# Contributing to sysmon
+# Contributing to systrace
 
 ## Scope rules
 
-- **Read-only.** No code may change system, OS, network or app state. That means no process control, no setting changes, no config edits and no packet injection. sysmon only writes its own config, baselines, recordings and exports. PRs that add a system write are out of scope.
+- **Read-only.** No code may change system, OS, network or app state. That means no process control, no setting changes, no config edits and no packet injection. systrace only writes its own config, baselines, recordings and exports. PRs that add a system write are out of scope.
 - **General computing only.** No app- or game-specific integrations.
 - **No root by default.** Features that need privileges must degrade cleanly, and `probe()` must explain what's needed.
 
@@ -10,10 +10,10 @@
 
 - Modules read the OS and push raw numbers. They never format values or draw UI.
 - Front ends never touch the OS.
-- **Second use → extract.** When a function is needed a second time, move it to `sysmon_core::util` (or `sysmon_core::platform` if OS-specific). Don't abstract before that.
+- **Second use → extract.** When a function is needed a second time, move it to `systrace_core::util` (or `systrace_core::platform` if OS-specific). Don't abstract before that.
 - **One way to do each thing:** one formatter (`core::fmt`), one exporter (`core::export`), one selector matcher, one rate calculator.
 - Modules are plain structs in a static registry. No dynamic loading and no async runtime.
-- Adding a module should touch only its own folder and one registry line. If it needs changes to core or a front end, fix the abstraction.
+- Adding a module should touch only its own folder, its feature in `crates/modules/Cargo.toml` and its registry lines. If it needs changes to core or a front end, fix the abstraction.
 
 ## Style
 
@@ -42,8 +42,8 @@
 //! Linux pressure stall information (PSI) for memory.
 //! Read-only: parses /proc/pressure/memory.
 
-use sysmon_core::platform::linux::read_to_string;
-use sysmon_core::prelude::*;
+use systrace_core::platform::linux::read_to_string;
+use systrace_core::prelude::*;
 
 const PATH: &str = "/proc/pressure/memory";
 
@@ -121,9 +121,20 @@ mod tests {
 }
 ```
 
-Registration:
+Registration, in `crates/modules/Cargo.toml` and `crates/modules/src/lib.rs`:
+
+```toml
+[features]
+default = ["cpu", "psi"]
+psi = []
+```
 
 ```rust
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "psi", target_os = "linux"))]
+mod psi;
+
+#[cfg(all(feature = "psi", target_os = "linux"))]
 reg.push(Box::new(psi::PsiMemory::default()));
 ```
+
+Every module gets a feature and is listed in `default`. OS-specific modules also gate on `target_os`, so the feature is a no-op on other OSes. Their dependencies go in a `[target.'cfg(...)'.dependencies]` table as `optional = true`.

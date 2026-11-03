@@ -8,7 +8,9 @@ pub fn value(v: f64, unit: Unit) -> String {
         Unit::Bytes => bytes(v),
         Unit::BytesPerSec => format!("{}/s", bytes(v)),
         Unit::Hertz => scaled(v, 1000.0, &["Hz", "kHz", "MHz", "GHz"]),
+        Unit::Celsius => format!("{v:.1} °C"),
         Unit::Count => format!("{v:.0}"),
+        Unit::PerSec => format!("{v:.1}/s"),
         Unit::Number => format!("{v:.2}"),
     }
 }
@@ -41,7 +43,9 @@ mod tests {
         assert_eq!(value(1536.0 * 1024.0, Unit::Bytes), "1.50 MiB");
         assert_eq!(value(2048.0, Unit::BytesPerSec), "2.00 KiB/s");
         assert_eq!(value(3_200_000_000.0, Unit::Hertz), "3.20 GHz");
+        assert_eq!(value(41.25, Unit::Celsius), "41.2 °C");
         assert_eq!(value(7.0, Unit::Count), "7");
+        assert_eq!(value(12.34, Unit::PerSec), "12.3/s");
         assert_eq!(value(1.234, Unit::Number), "1.23");
     }
 }
