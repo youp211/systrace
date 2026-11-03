@@ -18,7 +18,7 @@ const PRESSURE: MetricId = MetricId::new("plumbing.pressure");
 
 const COW_PATIENCE: Duration = Duration::from_secs(2);
 
-const MESSAGE: &str = "Plumbing checked: the core runs on its own. Plug in some modules!";
+const MESSAGE: &str = "Like a cowsay maybe or just print if installed about checking the plumbing basically idk. the core runs on its own. Plug in some modules!";
 
 /// Stand-in module: a counter that rises 1 KiB per tick and a steady gauge.
 #[derive(Default)]

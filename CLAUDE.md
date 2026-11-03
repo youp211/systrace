@@ -26,6 +26,7 @@ cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --all-targets -- -D warnings      # core + CLI alone
 cargo run --no-default-features --example plumbing                   # core alone, end to end (cowsay easter egg)
 cargo run --no-default-features --features cpu,tui -- modules        # chosen features only
+scripts/build-macos-cli.sh                  # release build in target/macos-cli/release/; also -tui, -all
 
 # Lint for Linux or Windows from a Mac, without rustup: builds std from the toolchain's
 # rust-src. Catches platform-only errors that macOS can't see (CI only runs on push).
@@ -44,7 +45,7 @@ The TUI and GUI can't be launched without a terminal or display. Check TUI rende
 
 ## Architecture
 
-One package, `systrace`: library plus binary. The core and CLI are always compiled. Each module and each front end (`tui`, `gui`) is a cargo feature, all in `default`.
+One package, `systrace`: library plus binary. The core and CLI are always compiled. Each module and each front end (`tui`, `gui`) is a cargo feature. `modules` turns on every module, and `default` is `modules`, `tui` and `gui`.
 
 [tests/boundaries.rs](tests/boundaries.rs) enforces the layers. It parses every file with `syn` and resolves `crate::`/`super::`/`self::` paths, including in macro bodies, to the top-level item they reach. It rejects `use crate as x`, `extern crate self` and `#[path]`.
 
@@ -70,14 +71,14 @@ Core is everything in `src/` outside `modules/`, `tui/` and `gui/`, and it uses 
 - **The CLI** ([main.rs](src/main.rs), [commands.rs](src/commands.rs)) is the composition root: it may use every layer but `platform`.
   - It builds a `Host` from `modules::all()`, then hands it to the TUI or GUI, or prints through `export`.
   - `-f` defaults to table on a TTY and NDJSON when piped, and a broken pipe exits 0.
-  - Usage errors exit 2: bad interval, a selector that matches no metric, no command while piped.
+  - Usage errors exit 2: bad interval, a selector that matches no metric, no command while piped or in a build without the TUI.
 
 ### Modules
 
 [src/modules/](src/modules/) holds the plugins. They may use only `crate::prelude`, `crate::util` and `crate::platform`.
 
 - **Header:** each file implements `Module` ([module.rs](src/module.rs)) and declares `pub const HEADER: Header` (`id`, `name`, `reads`).
-- **Registration:** each has a feature in [Cargo.toml](Cargo.toml) and one line in the `modules!` macro ([mod.rs](src/modules/mod.rs)), e.g. `"process" => process::Process if "macos";`. [tests/registry.rs](tests/registry.rs) checks that every module file is registered and on by default.
+- **Registration:** each has a feature in [Cargo.toml](Cargo.toml), listed in `modules`, and one line in the `modules!` macro ([mod.rs](src/modules/mod.rs)), e.g. `"process" => process::Process if "macos";`. [tests/registry.rs](tests/registry.rs) checks that every module file is registered and listed in `modules`, and that `modules` lists only modules.
 - **Units:** modules convert to their declared unit before pushing: bytes, Hz, °C, percent, and per-second rates for counters via their own `util::rate::Rates`. `Kind::Counter` is only a label.
 - **No fake data:** with no fresh reading, a module skips the push. The cases are a first counter total, a reset, a cached OS answer, a sysinfo refresh interval not yet up, and a device that is gone.
 - **Device modules** (disk, net, thermals, gpu) fix their device list in `probe()`, sorted for stable suffixes. They re-find devices by stable identity (mount plus device ID, interface name, sensor label, PCI address) and refresh sysinfo lists with `true`. When nothing is found, they report a module-level ID (`disk`, `net`, `thermals`, `gpu`) as unavailable.
@@ -124,7 +125,7 @@ Use sysinfo where it reports real values; where it doesn't, add a safe wrapper i
   - Module files start with a `//!` comment saying what they read, then `Read-only.`
   - Doc comments are a short title.
   - Split files past about 300 lines.
-- **Adding a module** touches only its file in `src/modules/`, its feature in `Cargo.toml`, its `modules!` line, and its README row and build-command feature. If core or a front end needs changing, fix the abstraction instead.
+- **Adding a module** touches only its file in `src/modules/`, its feature in `Cargo.toml` (listed in `modules`), its `modules!` line, and its README row. If core or a front end needs changing, fix the abstraction instead.
 - **Shared helpers:**
 
   | For | Use |

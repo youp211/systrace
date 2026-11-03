@@ -15,11 +15,19 @@ cargo build --release
 ./target/release/systrace
 ```
 
-For a machine without a display, leave out the GUI:
+For a machine without a display, leave out the GUI, or both front ends. The `modules` feature turns on every module:
 
 ```sh
-cargo build --release --no-default-features \
-  --features cpu,memory,mem_pressure,disk,net,process,thermals,gpu,tui
+cargo build --release --no-default-features --features modules,tui   # CLI and TUI
+cargo build --release --no-default-features --features modules       # CLI only
+```
+
+On a Mac, these scripts run the three builds, each in its own target directory so that one never replaces another:
+
+```sh
+scripts/build-macos-all.sh   # target/macos-all/release/systrace: CLI, TUI and GUI
+scripts/build-macos-tui.sh   # target/macos-tui/release/systrace: CLI and TUI
+scripts/build-macos-cli.sh   # target/macos-cli/release/systrace: CLI only
 ```
 
 On Linux, the GUI needs the X11 and xkb development packages: `libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev`.
@@ -27,7 +35,7 @@ On Linux, the GUI needs the X11 and xkb development packages: `libxkbcommon-dev 
 ## Use
 
 ```sh
-systrace                      # terminal dashboard (when run in a terminal)
+systrace                      # terminal dashboard (in a terminal, in builds with the TUI)
 systrace tui -i 500ms         # dashboard with a 500 ms sample interval
 systrace gui                  # desktop window with the same panels
 
@@ -51,7 +59,7 @@ A metric with no fresh reading this sample is left out of `snapshot` and drawn a
 
 Some metrics need more access than a normal user has. For example, macOS thread counts only include processes you can inspect unless systrace runs as root. `doctor` lists each case and what would fix it.
 
-Exit codes: `0` ok, `1` error, `2` usage error, such as an unknown flag, an interval out of range, a selector that matches no metric, or no command when output is piped.
+Exit codes: `0` ok, `1` error, `2` usage error, such as an unknown flag, an interval out of range, a selector that matches no metric, or no command when output is piped or the build has no TUI.
 
 ## What it measures
 

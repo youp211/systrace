@@ -1,8 +1,11 @@
-//! Every module file is registered with a feature that exists and is on by default.
-//! A missing `modules!` line or feature would compile the module out without a word.
+//! Every module file is registered, and the `modules` feature, which `default`
+//! turns on, lists exactly the registered modules and no front end. A missing
+//! `modules!` line or feature would compile the module out without a word.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -21,38 +24,36 @@ fn registry() -> Vec<(String, String)> {
         .collect()
 }
 
-/// Feature names in Cargo.toml's `[features]` table, and the `default` list.
-fn features() -> (Vec<String>, Vec<String>) {
-    // CRLF-safe, in case a checkout converted line endings.
-    let text = fs::read_to_string(root().join("Cargo.toml"))
-        .unwrap_or_default()
-        .replace("\r\n", "\n");
-    let table = text
-        .split("\n[features]\n")
-        .nth(1)
-        .and_then(|t| t.split("\n[").next())
-        .unwrap_or_default();
-    let mut names = vec![];
-    let mut default = vec![];
-    for line in table.lines() {
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        let name = name.trim().to_string();
-        if name.starts_with('#') {
-            continue;
+/// Each feature and what it lists, as cargo itself reads Cargo.toml.
+fn features() -> BTreeMap<String, BTreeSet<String>> {
+    // `--no-deps` reads only this package, so it never touches the network.
+    let out = Command::new(env!("CARGO"))
+        .args(["metadata", "--no-deps", "--format-version=1"])
+        .arg("--manifest-path")
+        .arg(root().join("Cargo.toml"))
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        out.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("cargo metadata prints JSON");
+    serde_json::from_value(metadata["packages"][0]["features"].clone())
+        .expect("features map names to lists")
+}
+
+/// Everything `feature` turns on, directly or through other features.
+fn turned_on(features: &BTreeMap<String, BTreeSet<String>>, feature: &str) -> BTreeSet<String> {
+    let mut on = BTreeSet::new();
+    let mut todo = vec![feature.to_string()];
+    while let Some(f) = todo.pop() {
+        if on.insert(f.clone()) {
+            todo.extend(features.get(&f).into_iter().flatten().cloned());
         }
-        if name == "default" {
-            default = value
-                .split('"')
-                .skip(1)
-                .step_by(2)
-                .map(String::from)
-                .collect();
-        }
-        names.push(name);
     }
-    (names, default)
+    on
 }
 
 #[test]
@@ -79,16 +80,22 @@ fn every_module_file_is_registered() {
 }
 
 #[test]
-fn every_registered_feature_exists_and_is_default() {
-    let (names, default) = features();
-    for (feature, _) in registry() {
-        assert!(
-            names.contains(&feature),
-            "feature `{feature}` missing from Cargo.toml"
-        );
-        assert!(
-            default.contains(&feature),
-            "feature `{feature}` not in `default`"
-        );
+fn modules_lists_exactly_the_registered_modules() {
+    let features = features();
+    let listed = |name: &str| features.get(name).cloned().unwrap_or_default();
+    assert!(
+        listed("default").contains("modules"),
+        "`modules` not in `default`"
+    );
+    let registered: BTreeSet<String> = registry().into_iter().map(|(f, _)| f).collect();
+    assert_eq!(listed("modules"), registered, "`modules` vs modules! lines");
+}
+
+/// Built alone, `modules` is the CLI with every module and no front end.
+#[test]
+fn modules_turn_on_no_front_end() {
+    let on = turned_on(&features(), "modules");
+    for front in ["tui", "gui"] {
+        assert!(!on.contains(front), "`modules` turns on `{front}`");
     }
 }

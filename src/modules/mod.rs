@@ -1,7 +1,7 @@
 //! Built-in modules (plugins).
 //!
 //! To add a module: write `src/modules/<name>.rs`, add a `<name>` feature in
-//! Cargo.toml (and to `default`), then add one line to `modules!` below.
+//! Cargo.toml (and to `modules`), then add one line to `modules!` below.
 
 use crate::prelude::Module;
 

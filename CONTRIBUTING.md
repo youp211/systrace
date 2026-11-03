@@ -161,11 +161,11 @@ mod tests {
 
 ## Registering a module
 
-Save the module as `src/modules/psi.rs`. In `Cargo.toml`, add a feature and list it in `default`. Dependencies only one OS needs go in a `[target.'cfg(...)'.dependencies]` table with `optional = true`:
+Save the module as `src/modules/psi.rs`. In `Cargo.toml`, add a feature and list it in `modules`, which `default` turns on. Dependencies only one OS needs go in a `[target.'cfg(...)'.dependencies]` table with `optional = true`:
 
 ```toml
 [features]
-default = ["cpu", "psi", "tui", "gui"]
+modules = ["cpu", "psi"]
 psi = []
 ```
 
@@ -178,6 +178,6 @@ modules! {
 }
 ```
 
-The line declares the file and registers the module under the same `cfg`. `tests/registry.rs` fails if a module file has no line or its feature is missing from `default`; `tests/conformance.rs` samples it twice and checks every value it pushes; `tests/boundaries.rs` checks what it imports.
+The line declares the file and registers the module under the same `cfg`. `tests/registry.rs` fails if a module file has no line or its feature is missing from `modules`; `tests/conformance.rs` samples it twice and checks every value it pushes; `tests/boundaries.rs` checks what it imports.
 
-Finally, add the module to README.md: its row in "What it measures", and its feature in the no-GUI build command.
+Finally, add the module's row to "What it measures" in README.md. Builds that use `modules`, such as the `scripts/build-macos-*.sh` builds, pick the module up on their own.
