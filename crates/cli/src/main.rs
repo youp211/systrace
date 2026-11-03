@@ -1,4 +1,4 @@
-//! sysmon command-line interface.
+//! systrace command-line interface.
 
 mod commands;
 
@@ -7,11 +7,11 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use sysmon_core::export::Format;
+use systrace_core::export::Format;
 
 #[derive(Parser)]
 #[command(
-    name = "sysmon",
+    name = "systrace",
     version,
     about = "Read-only system performance monitor"
 )]
@@ -26,8 +26,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Interactive dashboard (the default on a terminal)
+    Tui {
+        /// Time between samples
+        #[arg(short, long, default_value = "1s", value_parser = parse_duration)]
+        interval: Duration,
+    },
     /// Show what this machine can measure, with fix hints
-    Doctor,
+    Doctor {
+        /// Only show degraded and unavailable metrics
+        #[arg(short, long)]
+        problems: bool,
+    },
     /// List loaded modules and their status
     Modules,
     /// List the metric catalog
@@ -69,9 +79,10 @@ fn main() -> ExitCode {
     let format = cli.format.map(Format::from).unwrap_or_else(default_format);
 
     let result = match cli.cmd {
-        // The TUI takes over the no-argument case in Phase 1.
+        None if io::stdout().is_terminal() => commands::tui(Duration::from_secs(1)),
         None => Cli::command().print_help(),
-        Some(Cmd::Doctor) => commands::doctor(format),
+        Some(Cmd::Tui { interval }) => commands::tui(interval),
+        Some(Cmd::Doctor { problems }) => commands::doctor(problems, format),
         Some(Cmd::Modules) => commands::modules(format),
         Some(Cmd::Metrics { selectors }) => commands::metrics(&selectors, format),
         Some(Cmd::Snapshot {
@@ -84,7 +95,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("sysmon: error: {e}");
+            eprintln!("systrace: error: {e}");
             ExitCode::FAILURE
         }
     }

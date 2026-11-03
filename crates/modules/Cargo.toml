@@ -1,14 +1,31 @@
 [package]
-name = "sysmon-modules"
+name = "systrace-modules"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+# One feature per module. A module's feature only takes effect on the OSes it
+# supports: enabling an OS-specific module elsewhere compiles nothing and pulls
+# no dependencies, so `default` can list every module.
+#
+# Build a subset with:
+#   cargo build -p systrace-cli --no-default-features --features systrace-modules/cpu
 [features]
-default = ["cpu"]
-cpu = ["dep:sysinfo"]
+default = ["cpu", "memory", "mem_pressure", "disk", "net", "process", "thermals", "gpu"]
+cpu = ["dep:sysinfo", "sysinfo/system"]
+memory = ["dep:sysinfo", "sysinfo/system"]
+disk = ["dep:sysinfo", "sysinfo/disk"]
+net = ["dep:sysinfo", "sysinfo/network"]
+thermals = ["dep:sysinfo", "sysinfo/component"]
+gpu = ["dep:sysinfo", "sysinfo/gpu"]
+# macOS only for now; native APIs via systrace_core::platform::macos.
+mem_pressure = []
+process = []
 
 [dependencies]
-sysmon-core.workspace = true
+systrace-core.workspace = true
 sysinfo = { workspace = true, optional = true }
+
+# OS-specific module dependencies go in target tables and stay optional, e.g.
+# [target.'cfg(target_os = "linux")'.dependencies]

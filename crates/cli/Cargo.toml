@@ -1,17 +1,22 @@
 [package]
-name = "sysmon-cli"
+name = "systrace-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "sysmon"
+name = "systrace"
 path = "src/main.rs"
 
 [dependencies]
-sysmon-core.workspace = true
-sysmon-modules.workspace = true
+systrace-core.workspace = true
+systrace-modules = { workspace = true, default-features = false }
+systrace-tui.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+# Module selection lives in systrace-modules; see its Cargo.toml.
+[features]
+default = ["systrace-modules/default"]

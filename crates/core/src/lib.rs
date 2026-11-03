@@ -1,11 +1,13 @@
-//! sysmon core: module host, metric store, display model, export and shared utilities.
+//! systrace core: module host, metric store, display model, export and shared utilities.
 
 pub mod display;
 pub mod export;
 pub mod fmt;
 pub mod host;
+pub mod layout;
 pub mod metric;
 pub mod module;
+pub mod platform;
 pub mod store;
 pub mod util;
 

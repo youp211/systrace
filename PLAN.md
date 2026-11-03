@@ -1,13 +1,13 @@
-# sysmon plan
+# systrace plan
 
 A read-only, cross-platform (macOS, Windows, Linux) performance monitor for general computing workloads. It ships as a CLI and a TUI first, with a GUI later. It can watch the whole system or one workload: a game, a training run, an LLM server, a compile. It measures the workload, records it, finds bottlenecks and anomalies, and suggests OS and hardware settings worth looking at.
 
 ## Scope
 
-- **Read-only.** sysmon observes, analyzes, reports and exports. It never changes system, OS, network or app state. It never kills processes, applies settings, edits app or game configs, or sends packets.
-- **The only files sysmon writes** are its own config, baselines, recordings and exports.
-- **`sysmon run -- CMD`** launches the user's command so it can be tracked from t=0. Launching it is the only thing that command does.
-- **General computing only.** sysmon has no app-specific integrations: no frame-timing hooks and no app metric scraping.
+- **Read-only.** systrace observes, analyzes, reports and exports. It never changes system, OS, network or app state. It never kills processes, applies settings, edits app or game configs, or sends packets.
+- **The only files systrace writes** are its own config, baselines, recordings and exports.
+- **`systrace run -- CMD`** launches the user's command so it can be tracked from t=0. Launching it is the only thing that command does.
+- **General computing only.** systrace has no app-specific integrations: no frame-timing hooks and no app metric scraping.
 - **No root needed by default.** Elevated access unlocks extras, and `doctor` explains what each extra needs.
 
 ## Stack
@@ -46,11 +46,11 @@ core ──▶ cli (clap)      scripted, one-shot, streaming, exports
 
 ```
 crates/
-  core/      sysmon-core      traits, store, display model, export, fmt, util
-  modules/   sysmon-modules   one folder per module, cargo feature per module
-  cli/       sysmon-cli       binary `sysmon`
-  tui/       sysmon-tui       Phase 1
-  gui/       sysmon-gui       Phase 7
+  core/      systrace-core      traits, store, display model, export, fmt, util
+  modules/   systrace-modules   one folder per module, cargo feature per module
+  cli/       systrace-cli       binary `systrace`
+  tui/       systrace-tui       Phase 1
+  gui/       systrace-gui       Phase 7
 ```
 
 ### Module contract
@@ -85,6 +85,7 @@ pub trait Module: Send {
 | `net` | interface counters, errors, drops, TCP stats, connections → PID | all |
 | `process` | process tree, per-process CPU/mem/IO, target tracking | all |
 | `thermals` | sensors where exposed | all, best-effort |
+| `gpu` | sysinfo fallback: utilization, dedicated memory | all |
 | `gpu_nvidia` | NVML (dlopen): util, VRAM, per-process, clocks, power, throttle reasons, PCIe | Linux, Windows |
 | `gpu_drm` | sysfs + DRM fdinfo (AMD/Intel, per-process) | Linux |
 | `gpu_win` | PDH "GPU Engine" / "GPU Process Memory" (any vendor) | Windows |
@@ -157,29 +158,29 @@ Network baselines are kept per network, keyed by gateway MAC or SSID.
 ## CLI
 
 ```
-sysmon                          # TUI (Phase 1; prints help until then)
-sysmon tui [--pid N | --name X]
+systrace                          # TUI (Phase 1; prints help until then)
+systrace tui [--pid N | --name X]
 
-sysmon doctor                   # capability matrix + fix hints
-sysmon modules                  # loaded modules + status
-sysmon metrics [SEL...]         # catalog: id, unit, kind, availability
+systrace doctor [-p]              # capability matrix + fix hints; -p: problems only
+systrace modules                  # loaded modules + status
+systrace metrics [SEL...]         # catalog: id, unit, kind, availability
 
-sysmon snapshot [SEL...]        # one sample
-sysmon watch SEL... [-i 500ms] [-n COUNT | -d 30s] [--until EXPR]
-sysmon top [--sort cpu|mem|gpu|io|net] [--limit 10] [--once]
+systrace snapshot [SEL...]        # one sample
+systrace watch SEL... [-i 500ms] [-n COUNT | -d 30s] [--until EXPR]
+systrace top [--sort cpu|mem|gpu|io|net] [--limit 10] [--once]
 
-sysmon record -o run.smr [-d 10m] [--pid N | --name X | -- CMD] [--capture [-i IF] [-F BPF] [--pcap out.pcapng]]
-sysmon run -o run.smr -- CMD
+systrace record -o run.smr [-d 10m] [--pid N | --name X | -- CMD] [--capture [-i IF] [-F BPF] [--pcap out.pcapng]]
+systrace run -o run.smr -- CMD
 
-sysmon report [run.smr | cap.pcapng] [--fail-on warning]
-sysmon anomalies [run.smr] [--follow]
-sysmon advise [run.smr]
-sysmon diff a.smr b.smr
+systrace report [run.smr | cap.pcapng] [--fail-on warning]
+systrace anomalies [run.smr] [--follow]
+systrace advise [run.smr]
+systrace diff a.smr b.smr
 
-sysmon capture -i IF [-F BPF] [-d 60s] -o cap.pcapng
-sysmon flows [-i IF | cap.pcapng] [--sort bytes|rtt|retrans|jitter] [--pid N]
+systrace capture -i IF [-F BPF] [-d 60s] -o cap.pcapng
+systrace flows [-i IF | cap.pcapng] [--sort bytes|rtt|retrans|jitter] [--pid N]
 
-sysmon export run.smr -f csv|json|ndjson|perfetto [-o out] [--flows] [SEL...]
+systrace export run.smr -f csv|json|ndjson|perfetto [-o out] [--flows] [SEL...]
 ```
 
 **Shared conventions:**
@@ -226,7 +227,7 @@ All exports go through `core::export`. Every export embeds the system info and t
 ## Testing
 
 - **Parsers are pure functions,** tested against real OS output saved in `tests/fixtures/<os>/`. They run on every OS in CI.
-- **CI matrix:** macOS, Windows and Linux running fmt, clippy (`-D warnings`), tests, and smoke tests (`sysmon doctor`, `sysmon snapshot -f json`).
+- **CI matrix:** macOS, Windows and Linux running fmt, clippy (`-D warnings`), tests, and smoke tests (`systrace doctor`, `systrace snapshot -f json`).
 - **Hardware-specific modules** (GPU, Wi-Fi, capture) get manual testing on real machines. Primary dev hardware is an Apple Silicon Mac.
 
 ## Stability
@@ -236,5 +237,4 @@ All exports go through `core::export`. Every export embeds the system info and t
 
 ## Open questions
 
-- **Final name.** "Sysmon" clashes with Microsoft Sysinternals Sysmon on Windows. Resolve this before the first public release.
 - **License.** Undecided.

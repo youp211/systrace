@@ -16,6 +16,11 @@ impl Slot {
     fn usable(&self, id: &MetricId) -> bool {
         self.caps.get(id).is_some_and(Availability::is_usable)
     }
+
+    /// False when probe found nothing usable, e.g. a missing runtime library.
+    fn active(&self) -> bool {
+        self.caps.iter().any(|(_, s)| s.is_usable())
+    }
 }
 
 pub struct Host {
@@ -47,10 +52,10 @@ impl Host {
         }
     }
 
-    /// Samples every module once; samples for unusable metrics are dropped.
+    /// Samples every active module once; samples for unusable metrics are dropped.
     pub fn tick(&mut self) {
         let now = Instant::now();
-        for slot in &mut self.slots {
+        for slot in self.slots.iter_mut().filter(|s| s.active()) {
             slot.module.sample(&self.ctx, &mut self.sink);
             for (id, value) in self.sink.drain() {
                 if slot.usable(&id) {
@@ -58,6 +63,7 @@ impl Host {
                 }
             }
         }
+        self.store.end_tick();
     }
 
     pub fn store(&self) -> &Store {
@@ -73,16 +79,75 @@ impl Host {
         self.slots.iter().find_map(|s| s.caps.get(id))
     }
 
-    /// Panels whose metrics are all usable.
+    /// Non-empty panels whose metrics are all usable.
     pub fn panels(&self) -> Vec<Panel> {
         self.slots
             .iter()
             .flat_map(|s| {
-                s.module
-                    .panels()
-                    .into_iter()
-                    .filter(|p| p.widgets.iter().all(|w| s.usable(w.metric())))
+                s.module.panels().into_iter().filter(|p| {
+                    !p.widgets.is_empty() && p.widgets.iter().all(|w| s.usable(w.metric()))
+                })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+    use crate::metric::{MetricDesc, Unit};
+
+    const M: MetricId = MetricId::new("test.value");
+
+    struct Fake {
+        status: Availability,
+        sampled: Arc<AtomicBool>,
+    }
+
+    impl Module for Fake {
+        fn id(&self) -> &'static str {
+            "test"
+        }
+
+        fn probe(&mut self, _ctx: &Ctx) -> Capabilities {
+            Capabilities::all([M], self.status.clone())
+        }
+
+        fn metrics(&self) -> Vec<MetricDesc> {
+            vec![MetricDesc::gauge(M, Unit::Number)]
+        }
+
+        fn sample(&mut self, _ctx: &Ctx, out: &mut Sink) {
+            self.sampled.store(true, Ordering::Relaxed);
+            out.push(M, 1.0);
+        }
+    }
+
+    /// Host with one fake module, ticked once; returns whether it was sampled.
+    fn run(status: Availability) -> (Host, bool) {
+        let sampled = Arc::new(AtomicBool::new(false));
+        let mut host = Host::new(vec![Box::new(Fake {
+            status,
+            sampled: sampled.clone(),
+        })]);
+        host.tick();
+        (host, sampled.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn samples_usable_modules() {
+        let (host, sampled) = run(Availability::Available);
+        assert!(sampled);
+        assert_eq!(host.store().latest(&M), Some(1.0));
+    }
+
+    #[test]
+    fn skips_unusable_modules_but_reports_them() {
+        let (host, sampled) = run(Availability::unsupported("missing library"));
+        assert!(!sampled);
+        assert_eq!(host.capabilities().count(), 1);
     }
 }
