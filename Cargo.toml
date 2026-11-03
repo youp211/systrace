@@ -7,15 +7,19 @@ publish = false
 description = "Read-only system performance monitor"
 
 # The core and the CLI are always built. Everything else is a feature: one per
-# module, plus the `tui` and `gui` front ends. A module's feature only takes
-# effect on the OSes it supports, so `default` can list every module.
+# module, `modules` for all of them, and the `tui` and `gui` front ends. A
+# module's feature only takes effect on the OSes it supports, so `modules` can
+# list every module.
 #
-#   cargo build --no-default-features                     # core + CLI only
-#   cargo build --no-default-features --features cpu,tui  # a subset
+#   cargo build --no-default-features                         # core + CLI, no modules
+#   cargo build --no-default-features --features modules      # CLI with every module
+#   cargo build --no-default-features --features modules,tui  # ...and the TUI
+#   cargo build --no-default-features --features cpu,tui      # a subset
 [features]
-default = ["cpu", "memory", "mem_pressure", "disk", "net", "process", "thermals", "gpu", "tui", "gui"]
+default = ["modules", "tui", "gui"]
 
 # Modules (src/modules).
+modules = ["cpu", "memory", "mem_pressure", "disk", "net", "process", "thermals", "gpu"]
 cpu = ["dep:sysinfo", "sysinfo/system"]
 memory = ["dep:sysinfo", "sysinfo/system"]
 disk = ["dep:sysinfo", "sysinfo/disk"]

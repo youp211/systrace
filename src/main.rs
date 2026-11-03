@@ -89,7 +89,8 @@ fn main() -> ExitCode {
     let result = match cli.cmd {
         #[cfg(feature = "tui")]
         None if io::stdout().is_terminal() => commands::tui(Duration::from_secs(1)),
-        // Piped with no command: help is for a person, so it goes to stderr as a usage error.
+        // No command and no dashboard to open (piped, or built without the TUI): help goes
+        // to stderr as a usage error.
         None => {
             let _ = Cli::command().write_help(&mut io::stderr());
             return ExitCode::from(2);

@@ -46,7 +46,7 @@ core ──▶ cli   (clap)      one-shot, scripted, exports
 
 ### Layout
 
-One crate, `systrace`. The core and CLI are always built; modules and front ends are cargo features layered on top.
+One crate, `systrace`. The core and CLI are always built; modules and front ends are cargo features layered on top, and `modules` turns on every module.
 
 ```
 src/
@@ -59,7 +59,8 @@ src/
   tui/        feature `tui`                            terminal dashboard
   gui/        feature `gui`                            desktop window
 examples/plumbing.rs                                   core alone, end to end
-tests/conformance.rs, tests/boundaries.rs              plugin contract, layer boundaries
+tests/conformance.rs, boundaries.rs, registry.rs       plugin contract, layers, registration
+scripts/build-macos*.sh                                release builds for macOS, one target dir each
 ```
 
 The layers inside the crate are enforced by `tests/boundaries.rs`: modules use only `prelude`, `util` and `platform`; front ends never use `platform` or `modules`; core uses neither modules nor front ends.
@@ -240,8 +241,8 @@ All output goes through `crate::export`, which also cleans table cells and defus
 - **Parsers and matchers are pure functions,** tested against real OS output kept as constants in each file's test module. Tests of an OS-gated module run on that OS's CI runner.
 - **Conformance:** `tests/conformance.rs` checks every compiled-in module: unique, complete headers; well-formed, unique metric IDs under the module's ID; a capability for every metric and a metric for every usable capability; panels that only show declared metrics; and two real samples whose values are declared, finite and, for percentages, between 0 and 100.
 - **Boundaries:** `tests/boundaries.rs` parses the source with `syn` and resolves every `crate::`, `super::` and `self::` path (macro bodies included) to check what each layer reaches. It tests its own checker against known bypasses.
-- **Registry:** `tests/registry.rs` checks every module file has a `modules!` line and a default feature.
-- **Isolation:** CI lints and tests the core and CLI with no features (running the plumbing example), then lints every module and front-end feature alone.
+- **Registry:** `tests/registry.rs` checks every module file has a `modules!` line and a feature listed in `modules`, and that `modules` lists only modules.
+- **Isolation:** CI lints and tests the core and CLI with no features (running the plumbing example), then lints every feature alone: each module, each front end, and `modules` (the CLI-only build).
 - **CI matrix:** macOS, Windows and Linux run under bash with pinned actions and `--locked`: rustfmt on every file, clippy (`-D warnings`), tests, the isolation builds, and smoke tests that check `doctor` and `snapshot` JSON has rows. A separate job checks the MSRV.
 - **Front ends:** the TUI renders into ratatui's `TestBackend`; GUI geometry is unit-tested.
 - **Hardware-specific modules** (GPU, Wi-Fi, capture) get manual testing on real machines.
