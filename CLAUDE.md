@@ -26,6 +26,11 @@ cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --all-targets -- -D warnings      # core + CLI alone
 cargo run --no-default-features --example plumbing                   # core alone, end to end (cowsay easter egg)
 cargo run --no-default-features --features cpu,tui -- modules        # chosen features only
+
+# Lint for Linux or Windows from a Mac, without rustup: builds std from the toolchain's
+# rust-src. Catches platform-only errors that macOS can't see (CI only runs on push).
+RUSTC_BOOTSTRAP=1 cargo clippy -Zbuild-std=std,core,alloc,panic_abort,panic_unwind \
+  --target x86_64-unknown-linux-gnu --target-dir target/linux --all-targets -- -D warnings
 ```
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on macOS, Linux and Windows, always under bash (PowerShell would only fail a step on its last command), with actions pinned to commits and cargo run with `--locked`:
@@ -105,6 +110,7 @@ Use sysinfo where it reports real values; where it doesn't, add a safe wrapper i
 - **Process visibility.** Without root, `proc_pidinfo(PROC_PIDTASKINFO)` reads only some processes, about 60% here. `process` measures that at probe and reports "N of M readable" as `Degraded`, with a fix.
 - **`mach_host_self`.** It and `vm_kernel_page_size` are declared locally in `platform::macos`: libc deprecates the first and doesn't bind the second. The host port is cached in a `OnceLock`, since each call adds a port reference.
 - **GPU memory.** Apple Silicon GPUs report utilization but no dedicated memory (memory is unified). GPU metric IDs come from the model name, e.g. `gpu.apple_m3_max.util`.
+- **sysinfo's `Gpus` isn't `Send` on Linux.** It holds the NVML library handle, while `Module: Send`, so `gpu` keeps the list on a reader thread and asks it for a listing each tick over a channel, with a timeout. macOS can't reveal this: lint for Linux before pushing (see Commands).
 - **Free-memory level.** `kern.memorystatus_level` is the share of memory not wired or compressed. High is healthy, so its gauge is `higher_is_better`.
 - **Device lists are fixed at `probe()`.** Devices that appear later need a restart.
 
