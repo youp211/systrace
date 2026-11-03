@@ -6,7 +6,7 @@
 use std::io::{self, Write};
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use systrace::export::{self, Format, Record};
 use systrace::host::Host;
@@ -15,6 +15,8 @@ use systrace::util::rate::Rates;
 
 const FLOW: MetricId = MetricId::new("plumbing.flow");
 const PRESSURE: MetricId = MetricId::new("plumbing.pressure");
+
+const COW_PATIENCE: Duration = Duration::from_secs(2);
 
 const MESSAGE: &str = "Plumbing checked: the core runs on its own. Plug in some modules!";
 
@@ -100,7 +102,9 @@ fn main() -> ExitCode {
             value,
         })
         .collect();
-    let exported = export::write(&mut Vec::new(), &rows, Format::Csv).is_ok();
+    let mut csv = Vec::new();
+    let exported = export::write(&mut csv, &rows, Format::Csv).is_ok()
+        && String::from_utf8_lossy(&csv).contains("plumbing.flow,");
 
     let failed: Vec<_> = checks
         .iter()
@@ -119,6 +123,7 @@ fn main() -> ExitCode {
 
 /// Through cowsay when it's installed, plain text otherwise.
 /// No shell is involved: cowsay is started directly and reads the message on stdin.
+/// A cowsay that hangs is killed after `COW_PATIENCE`.
 fn say(message: &str) {
     let spawned = Command::new("cowsay")
         .stdin(Stdio::piped())
@@ -126,7 +131,7 @@ fn say(message: &str) {
         .stderr(Stdio::null())
         .spawn();
     let Ok(mut cow) = spawned else {
-        println!("{message}");
+        plain(message);
         return;
     };
     let fed = cow
@@ -134,8 +139,24 @@ fn say(message: &str) {
         .take()
         .is_some_and(|mut stdin| stdin.write_all(message.as_bytes()).is_ok());
     // Dropping stdin above closes the pipe so cowsay can finish.
-    let mooed = cow.wait().is_ok_and(|status| status.success());
+    let start = Instant::now();
+    let mooed = loop {
+        match cow.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if start.elapsed() < COW_PATIENCE => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = cow.kill();
+                let _ = cow.wait();
+                break false;
+            }
+        }
+    };
     if !(fed && mooed) {
-        let _ = writeln!(io::stdout(), "{message}");
+        plain(message);
     }
+}
+
+/// Plain output that doesn't panic if stdout is already closed.
+fn plain(message: &str) {
+    let _ = writeln!(io::stdout(), "{message}");
 }

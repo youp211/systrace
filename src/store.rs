@@ -23,10 +23,10 @@ impl Store {
         self.descs.insert(desc.id.clone(), desc);
     }
 
-    /// Records one sample for the current tick.
+    /// Records one sample for the current tick. Unregistered ids are ignored,
+    /// and a non-finite value leaves a gap, so output never shows NaN or inf.
     pub fn ingest(&mut self, id: MetricId, value: f64) {
-        if !self.descs.contains_key(&id) {
-            debug_assert!(false, "sample for unregistered metric {id}");
+        if !value.is_finite() || !self.descs.contains_key(&id) {
             return;
         }
         self.latest.insert(id.clone(), value);
@@ -90,6 +90,21 @@ mod tests {
         store.ingest(BYTES, 1000.0);
         store.end_tick();
         assert_eq!(store.latest(&BYTES), Some(1000.0));
+    }
+
+    #[test]
+    fn ignores_non_finite_and_unregistered_values() {
+        let mut store = Store::default();
+        store.register(MetricDesc::gauge(LEVEL, Unit::Number));
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            store.ingest(LEVEL, v);
+            store.end_tick();
+            assert_eq!(store.latest(&LEVEL), None);
+        }
+        store.ingest(BYTES, 1.0);
+        store.end_tick();
+        assert_eq!(store.latest(&BYTES), None);
+        assert!(store.history(&LEVEL).all(|v| v.is_none()));
     }
 
     #[test]

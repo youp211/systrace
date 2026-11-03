@@ -1,8 +1,8 @@
 //! Physical memory and swap via sysinfo.
 //! Read-only.
 
-use sysinfo::System;
 use crate::prelude::*;
+use sysinfo::System;
 
 pub const HEADER: Header = Header {
     id: "memory",

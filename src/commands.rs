@@ -21,8 +21,8 @@ pub fn doctor(problems: bool, format: Format) -> io::Result<()> {
                 .map(move |(id, status)| {
                     let (reason, fix) = match status {
                         Availability::Available => (None, None),
-                        Availability::Degraded { reason } => (Some(reason.clone()), None),
-                        Availability::Unavailable { reason, fix } => {
+                        Availability::Degraded { reason, fix }
+                        | Availability::Unavailable { reason, fix } => {
                             (Some(reason.clone()), fix.clone())
                         }
                     };
@@ -60,6 +60,7 @@ pub fn modules(format: Format) -> io::Result<()> {
 
 pub fn metrics(selectors: &[String], format: Format) -> io::Result<()> {
     let host = host();
+    check_selectors(&host, selectors)?;
     let rows: Vec<MetricRow> = host
         .store()
         .descs()
@@ -79,6 +80,7 @@ pub fn metrics(selectors: &[String], format: Format) -> io::Result<()> {
 
 pub fn snapshot(selectors: &[String], interval: Duration, format: Format) -> io::Result<()> {
     let mut host = host();
+    check_selectors(&host, selectors)?;
     // Rates and CPU usage need two samples.
     host.tick();
     thread::sleep(interval);
@@ -105,6 +107,31 @@ pub fn tui(interval: Duration) -> io::Result<()> {
 #[cfg(feature = "gui")]
 pub fn gui(interval: Duration) -> io::Result<()> {
     systrace::gui::run(host(), interval)
+}
+
+/// A selector that matches no metric is a usage error (exit 2), not an empty result.
+fn check_selectors(host: &Host, selectors: &[String]) -> io::Result<()> {
+    let unmatched: Vec<&str> = selectors
+        .iter()
+        .filter(|s| {
+            !host
+                .store()
+                .descs()
+                .any(|d| select::matches(s, d.id.as_str()))
+        })
+        .map(String::as_str)
+        .collect();
+    if unmatched.is_empty() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "no metric matches {}; see `systrace metrics`",
+                unmatched.join(", ")
+            ),
+        ))
+    }
 }
 
 fn host() -> Host {
@@ -235,5 +262,46 @@ impl Record for SampleRow {
 
     fn table_cells(&self) -> Vec<String> {
         vec![self.metric.clone(), fmt::value(self.value, self.unit)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Header and cells must line up, or table and CSV columns shift.
+    fn aligned<R: Record>(row: &R) -> bool {
+        row.cells().len() == R::header().len() && row.table_cells().len() == R::table_header().len()
+    }
+
+    #[test]
+    fn rows_match_their_headers() {
+        assert!(aligned(&DoctorRow {
+            module: "m",
+            metric: "m.x".into(),
+            status: "available",
+            reason: None,
+            fix: None,
+        }));
+        assert!(aligned(&ModuleRow {
+            module: "m",
+            name: "M",
+            reads: "r",
+            available: 1,
+            degraded: 0,
+            unavailable: 0,
+        }));
+        assert!(aligned(&MetricRow {
+            metric: "m.x".into(),
+            unit: "bytes".into(),
+            kind: "gauge".into(),
+            detect: None,
+            status: "available",
+        }));
+        assert!(aligned(&SampleRow {
+            metric: "m.x".into(),
+            value: 1.0,
+            unit: Unit::Bytes,
+        }));
     }
 }

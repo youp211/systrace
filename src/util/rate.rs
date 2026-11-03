@@ -44,6 +44,20 @@ mod tests {
     }
 
     #[test]
+    fn keys_rates_by_metric() {
+        const A: MetricId = MetricId::new("test.a");
+        const B: MetricId = MetricId::new("test.b");
+        let mut rates = Rates::default();
+        let t0 = Instant::now();
+        let t1 = t0 + Duration::from_secs(1);
+
+        assert_eq!(rates.update(&A, 100.0, t0), None);
+        assert_eq!(rates.update(&B, 5000.0, t0), None);
+        assert_eq!(rates.update(&A, 150.0, t1), Some(50.0));
+        assert_eq!(rates.update(&B, 5000.0, t1), Some(0.0));
+    }
+
+    #[test]
     fn tracks_totals_per_metric() {
         const BYTES: MetricId = MetricId::new("test.bytes");
         let mut rates = Rates::default();

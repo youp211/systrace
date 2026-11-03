@@ -3,3 +3,4 @@
 pub mod id;
 pub mod rate;
 pub mod select;
+pub mod text;

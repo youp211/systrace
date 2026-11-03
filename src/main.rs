@@ -89,7 +89,11 @@ fn main() -> ExitCode {
     let result = match cli.cmd {
         #[cfg(feature = "tui")]
         None if io::stdout().is_terminal() => commands::tui(Duration::from_secs(1)),
-        None => Cli::command().print_help(),
+        // Piped with no command: help is for a person, so it goes to stderr as a usage error.
+        None => {
+            let _ = Cli::command().write_help(&mut io::stderr());
+            return ExitCode::from(2);
+        }
         #[cfg(feature = "tui")]
         Some(Cmd::Tui { interval }) => commands::tui(interval),
         #[cfg(feature = "gui")]
@@ -106,6 +110,10 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+            eprintln!("systrace: {e}");
+            ExitCode::from(2)
+        }
         Err(e) => {
             eprintln!("systrace: error: {e}");
             ExitCode::FAILURE
@@ -121,16 +129,24 @@ fn default_format() -> Format {
     }
 }
 
-/// Duration parser: `250ms`, `2s`, `5m`.
+/// Shortest and longest sampling interval accepted.
+const MIN_INTERVAL: Duration = Duration::from_millis(10);
+const MAX_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Duration parser: `250ms`, `2s`, `5m`, between 10 ms and one day.
 fn parse_duration(s: &str) -> Result<Duration, String> {
     let split = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let (num, unit) = s.split_at(split);
     let n: u64 = num.parse().map_err(|_| format!("invalid duration `{s}`"))?;
-    match unit {
-        "ms" => Ok(Duration::from_millis(n)),
-        "s" => Ok(Duration::from_secs(n)),
-        "m" => Ok(Duration::from_secs(n * 60)),
-        _ => Err(format!("invalid duration `{s}` (use ms, s or m)")),
+    let d = match unit {
+        "ms" => Some(Duration::from_millis(n)),
+        "s" => Some(Duration::from_secs(n)),
+        "m" => n.checked_mul(60).map(Duration::from_secs),
+        _ => return Err(format!("invalid duration `{s}` (use ms, s or m)")),
+    };
+    match d {
+        Some(d) if (MIN_INTERVAL..=MAX_INTERVAL).contains(&d) => Ok(d),
+        _ => Err(format!("duration `{s}` must be between 10ms and 1440m")),
     }
 }
 
@@ -145,6 +161,18 @@ mod tests {
         assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(300)));
         assert!(parse_duration("5").is_err());
         assert!(parse_duration("ms").is_err());
+    }
+
+    #[test]
+    fn rejects_durations_out_of_range() {
+        assert!(parse_duration("0ms").is_err());
+        assert!(parse_duration("9ms").is_err());
+        assert_eq!(parse_duration("10ms"), Ok(MIN_INTERVAL));
+        assert_eq!(parse_duration("1440m"), Ok(MAX_INTERVAL));
+        assert!(parse_duration("1441m").is_err());
+        assert!(parse_duration("307445734561825861m").is_err());
+        assert!(parse_duration("9999999999999999999s").is_err());
+        assert!(parse_duration("99999999999999999999m").is_err());
     }
 
     #[test]

@@ -1,13 +1,16 @@
 //! CPU utilization, per-core frequency and load average via sysinfo.
 //! Read-only.
 
-use sysinfo::System;
+use std::time::Instant;
+
+use sysinfo::{MINIMUM_CPU_UPDATE_INTERVAL, System};
+
 use crate::prelude::*;
 
 pub const HEADER: Header = Header {
     id: "cpu",
     name: "CPU",
-    reads: "sysinfo: utilization, per-core frequency, load average",
+    reads: "sysinfo: utilization, load average; per-core frequency except on macOS",
 };
 
 const UTIL: MetricId = MetricId::new("cpu.util");
@@ -23,6 +26,9 @@ pub struct Cpu {
     cores: usize,
     /// False where sysinfo only reports a fixed nominal frequency.
     freq: bool,
+    /// When sysinfo last recomputed usage. Asked again sooner than
+    /// `MINIMUM_CPU_UPDATE_INTERVAL`, it returns the previous values.
+    refreshed: Option<Instant>,
 }
 
 /// Per-core util metric ids.
@@ -30,9 +36,9 @@ fn util_ids(cores: usize) -> impl Iterator<Item = MetricId> {
     (0..cores).map(|i| MetricId::owned(format!("cpu.core.{i}.util")))
 }
 
-/// Per-core freq metric ids; empty when frequency isn't live.
-fn freq_ids(cores: usize, live: bool) -> impl Iterator<Item = MetricId> {
-    (0..if live { cores } else { 0 }).map(|i| MetricId::owned(format!("cpu.core.{i}.freq")))
+/// Per-core freq metric ids.
+fn freq_ids(cores: usize) -> impl Iterator<Item = MetricId> {
+    (0..cores).map(|i| MetricId::owned(format!("cpu.core.{i}.freq")))
 }
 
 impl Module for Cpu {
@@ -44,46 +50,64 @@ impl Module for Cpu {
         let mut sys = match System::new() {
             Ok(sys) => sys,
             Err(e) => {
+                let ids = self.metrics().into_iter().map(|d| d.id);
                 return Capabilities::all(
-                    [UTIL],
+                    ids,
                     Availability::unsupported(format!("cannot read CPU stats: {e}")),
                 );
             }
         };
         sys.refresh_cpu_all();
+        self.refreshed = Some(Instant::now());
         self.cores = sys.cpus().len();
         self.sys = Some(sys);
         // macOS returns the same nominal value for every core; live clocks need IOReport.
         self.freq = !cfg!(target_os = "macos");
 
+        let freq = if self.freq {
+            Availability::Available
+        } else {
+            Availability::unsupported("macOS reports only a fixed nominal frequency")
+        };
         let load = match System::load_average() {
             Ok(_) => Availability::Available,
             Err(e) => Availability::unsupported(format!("load average: {e}")),
         };
-        let ids = std::iter::once(UTIL)
-            .chain(util_ids(self.cores))
-            .chain(freq_ids(self.cores, self.freq));
-        Capabilities::all(ids, Availability::Available).set(LOAD, load)
+        let util = std::iter::once(UTIL).chain(util_ids(self.cores));
+        Capabilities::all(util, Availability::Available)
+            .set(freq_ids(self.cores), freq)
+            .set(LOAD, load)
     }
 
     fn metrics(&self) -> Vec<MetricDesc> {
         let mut out = vec![MetricDesc::gauge(UTIL, Unit::Percent).detect(Detect::Spike)];
         out.extend(util_ids(self.cores).map(|id| MetricDesc::gauge(id, Unit::Percent)));
-        out.extend(freq_ids(self.cores, self.freq).map(|id| MetricDesc::gauge(id, Unit::Hertz)));
+        out.extend(freq_ids(self.cores).map(|id| MetricDesc::gauge(id, Unit::Hertz)));
         out.extend(LOAD.map(|id| MetricDesc::gauge(id, Unit::Number)));
         out
     }
 
     fn sample(&mut self, _ctx: &Ctx, out: &mut Sink) {
         let Some(sys) = &mut self.sys else { return };
-        sys.refresh_cpu_all();
-        out.push(UTIL, sys.global_cpu_usage().into());
 
-        for (id, cpu) in util_ids(self.cores).zip(sys.cpus()) {
-            out.push(id, cpu.usage().into());
-        }
-        for (id, cpu) in freq_ids(self.cores, self.freq).zip(sys.cpus()) {
-            out.push(id, cpu.frequency() as f64 * 1e6);
+        // Too soon after the last refresh, a "new" reading would be the old one again
+        // (or, on the first tick, the average since boot), so leave a gap instead.
+        let fresh = self
+            .refreshed
+            .is_none_or(|t| t.elapsed() >= MINIMUM_CPU_UPDATE_INTERVAL);
+        if fresh {
+            sys.refresh_cpu_all();
+            // Taken after the call, so it is never earlier than sysinfo's own timestamp.
+            self.refreshed = Some(Instant::now());
+            out.push(UTIL, sys.global_cpu_usage().into());
+            for (id, cpu) in util_ids(self.cores).zip(sys.cpus()) {
+                out.push(id, cpu.usage().into());
+            }
+            if self.freq {
+                for (id, cpu) in freq_ids(self.cores).zip(sys.cpus()) {
+                    out.push(id, cpu.frequency() as f64 * 1e6);
+                }
+            }
         }
 
         if let Ok(load) = System::load_average() {

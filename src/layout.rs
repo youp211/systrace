@@ -2,6 +2,12 @@
 
 use crate::display::Panel;
 
+/// Rows a panel needs in a text layout: one per widget plus its border. Also the
+/// weight `columns` balances, so the TUI and GUI arrange panels the same way.
+pub fn rows(panel: &Panel) -> usize {
+    panel.widgets.len() + 2
+}
+
 /// Splits panels into `count` columns of indices into `panels`.
 /// Highest priority goes first, each into the currently shortest column,
 /// so the busiest panels sit top-left and column heights stay balanced.

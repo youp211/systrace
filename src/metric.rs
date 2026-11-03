@@ -27,10 +27,11 @@ impl MetricId {
 }
 
 /// Natural order, so `cpu.core.2` sorts before `cpu.core.10`.
+/// Ties (`x.01` vs `x.1`) fall back to the raw string, so `Equal` means `==`.
 impl Ord for MetricId {
     fn cmp(&self, other: &Self) -> Ordering {
-        chunks(self.as_str())
-            .cmp(&chunks(other.as_str()))
+        Chunks(self.as_str())
+            .cmp(Chunks(other.as_str()))
             .then_with(|| self.0.cmp(&other.0))
     }
 }
@@ -47,23 +48,26 @@ enum Chunk<'a> {
     Text(&'a str),
 }
 
-/// Splits into digit and non-digit runs.
-fn chunks(s: &str) -> Vec<Chunk<'_>> {
-    let mut out = Vec::new();
-    let mut rest = s;
-    while let Some(first) = rest.chars().next() {
-        let digit = first.is_ascii_digit();
-        let end = rest
+/// Digit and non-digit runs of an id, without allocating.
+struct Chunks<'a>(&'a str);
+
+impl<'a> Iterator for Chunks<'a> {
+    type Item = Chunk<'a>;
+
+    fn next(&mut self) -> Option<Chunk<'a>> {
+        let digit = self.0.chars().next()?.is_ascii_digit();
+        let end = self
+            .0
             .find(|c: char| c.is_ascii_digit() != digit)
-            .unwrap_or(rest.len());
-        let (run, tail) = rest.split_at(end);
-        out.push(match run.parse() {
+            .unwrap_or(self.0.len());
+        let (run, rest) = self.0.split_at(end);
+        self.0 = rest;
+        // A digit run too long for u64 compares as text.
+        Some(match run.parse() {
             Ok(n) if digit => Chunk::Num(n),
             _ => Chunk::Text(run),
-        });
-        rest = tail;
+        })
     }
-    out
 }
 
 impl fmt::Display for MetricId {
@@ -81,7 +85,7 @@ pub enum Unit {
     Hertz,
     Celsius,
     Count,
-    /// Events per second, e.g. a counter of pages or packets.
+    /// Events per second, e.g. page faults or packets.
     PerSec,
     Number,
 }
@@ -139,14 +143,15 @@ impl MetricDesc {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Availability {
     Available,
-    Degraded { reason: String },
+    Degraded { reason: String, fix: Option<String> },
     Unavailable { reason: String, fix: Option<String> },
 }
 
 impl Availability {
-    pub fn degraded(reason: impl Into<String>) -> Self {
+    pub fn degraded(reason: impl Into<String>, fix: impl Into<String>) -> Self {
         Self::Degraded {
             reason: reason.into(),
+            fix: Some(fix.into()),
         }
     }
 
@@ -193,6 +198,12 @@ impl Capabilities {
         self
     }
 
+    /// Keeps only the entries whose id passes `keep`.
+    pub fn retain(mut self, mut keep: impl FnMut(&MetricId) -> bool) -> Self {
+        self.0.retain(|id, _| keep(id));
+        self
+    }
+
     pub fn get(&self, id: &MetricId) -> Option<&Availability> {
         self.0.get(id)
     }
@@ -228,5 +239,38 @@ mod tests {
                 "cpu.util"
             ]
         );
+    }
+
+    #[test]
+    fn order_agrees_with_equality() {
+        let a = MetricId::new("x.01");
+        let b = MetricId::new("x.1");
+        assert_ne!(a, b);
+        assert_ne!(a.cmp(&b), Ordering::Equal);
+        let map: BTreeMap<_, _> = [(a, 1), (b, 2)].into_iter().collect();
+        assert_eq!(map.len(), 2);
+
+        let names = [
+            "",
+            "a",
+            "a.1",
+            "a.01",
+            "a.10",
+            "a.2",
+            "a.b",
+            "1",
+            "01",
+            "a1b2",
+            "x.99999999999999999999999",
+            "x.18446744073709551615",
+            "ü.1",
+            "a..1",
+        ];
+        for x in names.map(MetricId::new) {
+            for y in names.map(MetricId::new) {
+                assert_eq!(x.cmp(&y), y.cmp(&x).reverse(), "{x} vs {y}");
+                assert_eq!(x.cmp(&y) == Ordering::Equal, x == y, "{x} vs {y}");
+            }
+        }
     }
 }

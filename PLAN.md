@@ -16,9 +16,9 @@ macOS on Apple Silicon is the primary platform: features land there first, and L
 
 | Concern | Choice |
 |---|---|
-| Language | Rust, edition 2024, MSRV 1.85 |
+| Language | Rust, edition 2024, MSRV 1.95 (set by sysinfo) |
 | Baseline metrics | `sysinfo` |
-| Deep metrics | native OS APIs behind `core::platform::<os>` |
+| Deep metrics | native OS APIs behind `crate::platform::<os>` |
 | CLI | `clap`, built into the core |
 | TUI | `ratatui` (with its re-exported `crossterm`) |
 | GUI | `egui` / `eframe` |
@@ -84,9 +84,10 @@ pub trait Module: Send {
 
 Planned additions, each with a default so existing modules keep compiling: `analyze(&self, store) -> Vec<Finding>` (phase 5) and `settings(&self, ctx) -> Vec<SettingState>` (phase 5.5).
 
-- **Capabilities are per metric:** `Available`, `Degraded { reason }` or `Unavailable { reason, fix }`. Front ends only show usable metrics, `doctor` prints the full matrix, and the host never samples a module with nothing usable.
-- **Modules convert, core stores.** A module pushes values in the unit its `MetricDesc` declares: bytes, Hz, °C, percent, and per-second rates for counters (via `util::rate::Rates`). The store keeps them as pushed, with a per-tick history in which a missed sample is a gap.
-- **Display primitives:** `Gauge` and `Series` today, with `Table`, `KeyValue`, `Events` and `Hint` added when their first user lands. Widgets reference metric IDs. `core::layout::columns` places panels by priority, and every front end uses it.
+- **Capabilities are per metric:** `Available`, `Degraded { reason, fix }` or `Unavailable { reason, fix }`. Front ends only show usable metrics, `doctor` prints the full matrix, and the host never samples a module with nothing usable.
+- **Modules convert, core stores.** A module pushes values in the unit its `MetricDesc` declares: bytes, Hz, °C, percent, and per-second rates for counters (via `util::rate::Rates`). The store keeps them as pushed, with a per-tick history in which a missed sample is a gap. A module that can't get a fresh reading (a cached OS answer, a source's minimum refresh interval, a device that disappeared) skips the push, so missing data is never shown as zero or as last tick's value.
+- **The host enforces the contract.** It drops capabilities and metrics outside a module's ID, repeated descriptions of an ID, samples for unusable or undeclared metrics, and non-finite values.
+- **Display primitives:** `Gauge` (optionally "higher is better", for metrics like free memory) and `Series` today, with `Table`, `KeyValue`, `Events` and `Hint` added when their first user lands. Widgets reference metric IDs, and labels and titles are cleaned of control characters when built. `crate::layout::columns` places panels by priority, and `crate::pace::Pace` sets the sampling cadence for both interactive front ends.
 - **Static registry.** Modules are compiled in through cargo features and one `modules!` line each in `src/modules/mod.rs`. No dynamic loading and no async runtime; a module uses threads plus a channel where it needs them.
 
 ## Modules
@@ -210,14 +211,14 @@ systrace export run.smr -f csv|json|ndjson|perfetto [-o out] [--flows] [SEL...]
 | pcapng | raw headers from `capture` / `--pcap` | planned |
 | Parquet, OpenMetrics | large recordings, monitoring stacks | later |
 
-All output goes through `core::export`. Every recording and export embeds the system info and the capability report.
+All output goes through `crate::export`, which also cleans table cells and defuses spreadsheet formulas in CSV. Recordings (`.smr`) and `export` will embed the system info and the capability report.
 
 ## Phases
 
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Core, CLI `doctor`/`modules`/`metrics`/`snapshot`, `cpu`, CI on 3 OSes | ✅ |
-| **1** | `memory`, `disk`, `net`, `process`, `thermals`, history ring, TUI + shared layout | ✅ (except `watch`, `top`, full `process`) |
+| **1** | `memory`, `disk`, `net`, `process`, `thermals`, history ring, TUI + shared layout, CLI `watch` and `top` | ✅ except `watch`, `top`, full `process` |
 | **2** | Target mode (`--pid`/`--name`/`run`), per-thread CPU, per-process mem/IO/TCP, `psi`, `mem_pressure`, `wifi`; extract `util::sockets`, `util::flow` | `mem_pressure` ✅ |
 | **3** | GPU vendor modules: IOReport → NVML → PDH → DRM | sysinfo `gpu` baseline ✅ |
 | **4** | `record`, `.smr`, `diff`, `export` in all formats, TUI replay | |
@@ -236,11 +237,12 @@ All output goes through `core::export`. Every recording and export embeds the sy
 
 ## Testing
 
-- **Parsers are pure functions,** tested against real OS output in `tests/fixtures/<os>/` on every OS in CI.
-- **Conformance:** `tests/conformance.rs` checks every compiled-in module: unique, complete headers, metrics under the module's ID, a capability for every metric, panels that only show declared metrics.
-- **Boundaries:** `tests/boundaries.rs` checks from source that each layer only uses what it's allowed to.
-- **Isolation:** CI builds and tests the core and CLI with no features (running the plumbing example), then every module and front-end feature alone.
-- **CI matrix:** macOS, Windows and Linux run fmt, clippy (`-D warnings`), tests, the isolation builds and smoke tests (`doctor -f json`, `snapshot -f json`).
+- **Parsers and matchers are pure functions,** tested against real OS output kept as constants in each file's test module. Tests of an OS-gated module run on that OS's CI runner.
+- **Conformance:** `tests/conformance.rs` checks every compiled-in module: unique, complete headers; well-formed, unique metric IDs under the module's ID; a capability for every metric and a metric for every usable capability; panels that only show declared metrics; and two real samples whose values are declared, finite and, for percentages, between 0 and 100.
+- **Boundaries:** `tests/boundaries.rs` parses the source with `syn` and resolves every `crate::`, `super::` and `self::` path (macro bodies included) to check what each layer reaches. It tests its own checker against known bypasses.
+- **Registry:** `tests/registry.rs` checks every module file has a `modules!` line and a default feature.
+- **Isolation:** CI lints and tests the core and CLI with no features (running the plumbing example), then lints every module and front-end feature alone.
+- **CI matrix:** macOS, Windows and Linux run under bash with pinned actions and `--locked`: rustfmt on every file, clippy (`-D warnings`), tests, the isolation builds, and smoke tests that check `doctor` and `snapshot` JSON has rows. A separate job checks the MSRV.
 - **Front ends:** the TUI renders into ratatui's `TestBackend`; GUI geometry is unit-tested.
 - **Hardware-specific modules** (GPU, Wi-Fi, capture) get manual testing on real machines.
 

@@ -3230,10 +3230,14 @@ dependencies = [
  "clap",
  "eframe",
  "libc",
+ "proc-macro2",
  "ratatui",
  "serde",
  "serde_json",
+ "signal-hook",
+ "syn 2.0.119",
  "sysinfo",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

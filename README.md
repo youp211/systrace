@@ -8,7 +8,7 @@ macOS on Apple Silicon is the primary platform. Linux and Windows build and run 
 
 ## Build
 
-Requires Rust 1.85 or newer.
+Requires Rust 1.95 or newer.
 
 ```sh
 cargo build --release
@@ -38,29 +38,35 @@ systrace metrics [SEL...]     # metric catalog: unit, kind, availability
 systrace snapshot [SEL...]    # one sample of current values
 ```
 
-Every command takes `-f table|json|ndjson|csv`. Output is a table in a terminal and NDJSON when piped.
+Every command takes `-f table|json|ndjson|csv`. Output is a table in a terminal and NDJSON when piped. Intervals (`-i`) take `ms`, `s` or `m`, from 10 ms to 1440 m.
 
-Selectors pick metrics by ID: `cpu` matches everything under `cpu.`, and `*` matches within IDs, as in `cpu.core.*.util`.
+Selectors pick metrics by ID: `cpu` matches everything under `cpu.`, and `*` matches any run of characters, as in `cpu.core.*.util`.
 
 ```sh
 systrace snapshot memory disk -f json
 systrace snapshot 'net.*.rx' -i 2s
 ```
 
-Some metrics need more access than a normal user has. For example, macOS thread counts only include processes you own unless systrace runs as root. `doctor` lists each case and what would fix it.
+A metric with no fresh reading this sample is left out of `snapshot` and drawn as a gap (`·` in the TUI), never as a made-up zero. For example, CPU usage needs 200 ms between readings, so `snapshot -i 100ms` has no CPU rows.
+
+Some metrics need more access than a normal user has. For example, macOS thread counts only include processes you can inspect unless systrace runs as root. `doctor` lists each case and what would fix it.
+
+Exit codes: `0` ok, `1` error, `2` usage error, such as an unknown flag, an interval out of range, a selector that matches no metric, or no command when output is piped.
 
 ## What it measures
 
 | Module | Metrics | Platforms |
 |---|---|---|
-| `cpu` | total and per-core utilization, load average; per-core frequency where the OS reports live values | all |
+| `cpu` | total and per-core utilization; load average (not Windows); per-core frequency where the OS reports live values (not macOS) | all |
 | `memory` | total, used, available, free, swap | all |
-| `mem_pressure` | memory-pressure level, wired, compressor size and contents, compressions, page-ins/outs, swap-ins/outs, faults | macOS |
+| `mem_pressure` | free-memory level (`kern.memorystatus_level`), wired, compressor size and contents, compression and decompression rates, page-ins/outs, swap-ins/outs, faults | macOS |
 | `disk` | space and read/write rate per device | all |
 | `net` | bytes, packets and errors per second per active interface | all |
 | `process` | process count, threads, running threads | macOS |
 | `thermals` | every exposed temperature sensor, plus the hottest | all |
-| `gpu` | utilization, and dedicated memory where the driver reports it | all |
+| `gpu` | utilization per GPU, and dedicated memory where the driver reports it | all |
+
+On macOS, `memory.available` counts inactive pages too (sysinfo's definition), so `used` and `available` can add up to more than `total`.
 
 Each module and each front end (`tui`, `gui`) is a cargo feature, all on by default. To build a subset:
 

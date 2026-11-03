@@ -1,10 +1,10 @@
 //! Per-interface network throughput, packets and errors via sysinfo.
 //! Read-only.
 
-use sysinfo::{InterfaceOperationalState, Networks};
 use crate::prelude::*;
 use crate::util::id;
 use crate::util::rate::Rates;
+use sysinfo::{InterfaceOperationalState, Networks};
 
 pub const HEADER: Header = Header {
     id: "net",
@@ -103,7 +103,8 @@ impl Module for Net {
         let Some(networks) = &mut self.networks else {
             return;
         };
-        networks.refresh(false);
+        // `true` drops interfaces that are gone, so they leave gaps rather than stale values.
+        networks.refresh(true);
 
         for iface in &self.interfaces {
             let Some(d) = networks.get(std::ffi::OsStr::new(&iface.name)) else {

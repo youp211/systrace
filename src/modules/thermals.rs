@@ -2,6 +2,7 @@
 //! Read-only.
 
 use sysinfo::Components;
+
 use crate::prelude::*;
 use crate::util::id;
 
@@ -11,7 +12,9 @@ pub const HEADER: Header = Header {
     reads: "sysinfo: temperature sensors",
 };
 
-/// Hottest sensor; also the doctor entry when no sensor is exposed.
+/// Module-level entry for doctor when no sensor is exposed.
+const THERMALS: MetricId = MetricId::new("thermals");
+/// Hottest sensor.
 const MAX: MetricId = MetricId::new("thermals.max");
 
 struct Sensor {
@@ -47,16 +50,18 @@ impl Module for Thermals {
             Ok(c) => c,
             Err(e) => {
                 return Capabilities::all(
-                    [MAX],
+                    [THERMALS],
                     Availability::unsupported(format!("cannot list sensors: {e}")),
                 );
             }
         };
-        let labels: Vec<String> = components
+        let mut labels: Vec<String> = components
             .iter()
             .filter(|c| c.temperature().is_some())
             .map(|c| c.label().to_string())
             .collect();
+        // Sorted, so repeated labels get the same `_2` suffix on every run.
+        labels.sort();
         self.sensors = id::segments(labels.iter().map(|l| sensor_name(l)))
             .into_iter()
             .zip(labels)
@@ -69,7 +74,7 @@ impl Module for Thermals {
 
         if self.sensors.is_empty() {
             return Capabilities::all(
-                [MAX],
+                [THERMALS],
                 Availability::unsupported("no temperature sensors exposed"),
             );
         }
@@ -78,6 +83,9 @@ impl Module for Thermals {
     }
 
     fn metrics(&self) -> Vec<MetricDesc> {
+        if self.sensors.is_empty() {
+            return vec![];
+        }
         let max = MetricDesc::gauge(MAX, Unit::Celsius).detect(Detect::Shift);
         let sensors = self
             .sensors
@@ -90,7 +98,8 @@ impl Module for Thermals {
         let Some(components) = &mut self.components else {
             return;
         };
-        components.refresh(false);
+        // `true` drops sensors that are gone, so they leave gaps rather than stale values.
+        components.refresh(true);
 
         let mut max = None::<f64>;
         for sensor in &self.sensors {
@@ -109,6 +118,9 @@ impl Module for Thermals {
     }
 
     fn panels(&self) -> Vec<Panel> {
+        if self.sensors.is_empty() {
+            return vec![];
+        }
         vec![
             Panel::new("thermals", "Thermals")
                 .priority(50)

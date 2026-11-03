@@ -2,7 +2,7 @@
 name = "systrace"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 publish = false
 description = "Read-only system performance monitor"
 
@@ -27,16 +27,35 @@ mem_pressure = []
 process = []
 
 # Front ends.
-tui = ["dep:ratatui"]
+tui = ["dep:ratatui", "dep:signal-hook"]
 gui = ["dep:eframe"]
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+unicode-width = "0.2"
 sysinfo = { version = "0.40", default-features = false, optional = true }
 ratatui = { version = "0.29", optional = true }
 eframe = { version = "0.31", optional = true }
 
+[target.'cfg(unix)'.dependencies]
+# Restores the terminal on SIGTERM/SIGHUP.
+signal-hook = { version = "0.3", optional = true }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# tests/boundaries.rs parses the source to check which layer uses which.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
+
+# All `unsafe` lives in src/platform, which allows it explicitly, and every
+# unsafe block needs a `SAFETY:` comment.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"

@@ -4,6 +4,18 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+# bash everywhere: on Windows the default PowerShell only fails a step on its
+# last command's exit code, which would hide an earlier failure.
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   check:
     strategy:
@@ -11,40 +23,62 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Actions are pinned to commits; the comment names the tag or branch.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: GUI system libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      # `cargo fmt` doesn't reach files declared inside the `modules!` macro,
+      # so rustfmt also runs on every tracked file directly.
+      - name: Format
+        run: |
+          cargo fmt --check
+          rustfmt --check $(git ls-files '*.rs')
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
 
       # Core + CLI with nothing else, and the plumbing check that drives it end to end.
       - name: Core alone
         run: |
-          cargo clippy --no-default-features --all-targets -- -D warnings
-          cargo test --no-default-features
-          cargo run -q --no-default-features --example plumbing
+          cargo clippy --locked --no-default-features --all-targets -- -D warnings
+          cargo test --locked --no-default-features
+          cargo run --locked -q --no-default-features --example plumbing
 
       # Plug and play: every module and front end builds on the core by itself.
       - name: Each feature alone
-        shell: bash
         run: |
-          features=$(cargo metadata --no-deps --format-version 1 |
+          features=$(cargo metadata --locked --no-deps --format-version 1 |
             jq -r '.packages[] | select(.name == "systrace") | .features | keys[] | select(. != "default")')
+          test -n "$features"
           for f in $features; do
             echo "::group::$f"
-            cargo clippy --no-default-features --features "$f" --all-targets -- -D warnings
+            cargo clippy --locked --no-default-features --features "$f" --all-targets -- -D warnings
             echo "::endgroup::"
           done
 
+      # Output must parse and contain rows, not just exit 0.
       - name: Smoke test
         run: |
-          cargo run -q -- doctor -f json
-          cargo run -q -- snapshot -f json
+          cargo run --locked -q -- doctor -f json | jq -e 'length > 0'
+          cargo run --locked -q -- snapshot -f json | jq -e 'length > 0 and all(.[]; .value | type == "number")'
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Keep in step with `rust-version` in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: GUI system libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - run: cargo check --locked --all-targets

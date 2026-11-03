@@ -11,6 +11,7 @@ pub mod host;
 pub mod layout;
 pub mod metric;
 pub mod module;
+pub mod pace;
 pub mod platform;
 pub mod store;
 pub mod util;
@@ -23,7 +24,7 @@ pub mod gui;
 pub mod tui;
 
 pub mod prelude {
-    pub use crate::display::{Panel, Widget};
+    pub use crate::display::{Level, Panel, Widget};
     pub use crate::metric::{Availability, Capabilities, Detect, Kind, MetricDesc, MetricId, Unit};
     pub use crate::module::{Ctx, Header, Module, Sink};
 }

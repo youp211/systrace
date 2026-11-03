@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::display::Panel;
 use crate::metric::{Capabilities, MetricDesc, MetricId};
+use crate::util::select;
 
 /// Per-tick context. Target selection lands here in Phase 2.
 #[derive(Debug)]
@@ -29,8 +30,15 @@ pub struct Sink {
 }
 
 impl Sink {
+    /// Records one value in the metric's declared unit. Non-finite values
+    /// (NaN, ±inf) are stored as a gap.
     pub fn push(&mut self, id: MetricId, value: f64) {
         self.samples.push((id, value));
+    }
+
+    /// What has been pushed since the host last collected, for tests and tools.
+    pub fn samples(&self) -> &[(MetricId, f64)] {
+        &self.samples
     }
 
     pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, (MetricId, f64)> {
@@ -56,9 +64,7 @@ pub struct Header {
 impl Header {
     /// True when `metric` belongs to this module: `cpu` owns `cpu` and `cpu.*`.
     pub fn owns(&self, metric: &str) -> bool {
-        metric
-            .strip_prefix(self.id)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        select::in_subtree(self.id, metric)
     }
 }
 
