@@ -2,3 +2,4 @@
 *.smr
 *.pcap
 *.pcapng
+.DS_Store

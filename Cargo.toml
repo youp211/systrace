@@ -1,20 +1,61 @@
-[workspace]
-resolver = "3"
-members = ["crates/*"]
-
-[workspace.package]
+[package]
+name = "systrace"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 publish = false
+description = "Read-only system performance monitor"
 
-[workspace.dependencies]
-systrace-core = { path = "crates/core" }
-systrace-modules = { path = "crates/modules" }
-systrace-tui = { path = "crates/tui" }
+# The core and the CLI are always built. Everything else is a feature: one per
+# module, plus the `tui` and `gui` front ends. A module's feature only takes
+# effect on the OSes it supports, so `default` can list every module.
+#
+#   cargo build --no-default-features                     # core + CLI only
+#   cargo build --no-default-features --features cpu,tui  # a subset
+[features]
+default = ["cpu", "memory", "mem_pressure", "disk", "net", "process", "thermals", "gpu", "tui", "gui"]
+
+# Modules (src/modules).
+cpu = ["dep:sysinfo", "sysinfo/system"]
+memory = ["dep:sysinfo", "sysinfo/system"]
+disk = ["dep:sysinfo", "sysinfo/disk"]
+net = ["dep:sysinfo", "sysinfo/network"]
+thermals = ["dep:sysinfo", "sysinfo/component"]
+gpu = ["dep:sysinfo", "sysinfo/gpu"]
+# macOS only; native APIs via src/platform/macos.rs.
+mem_pressure = []
+process = []
+
+# Front ends.
+tui = ["dep:ratatui", "dep:signal-hook"]
+gui = ["dep:eframe"]
+
+[dependencies]
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sysinfo = { version = "0.40", default-features = false }
+unicode-width = "0.2"
+sysinfo = { version = "0.40", default-features = false, optional = true }
+ratatui = { version = "0.29", optional = true }
+eframe = { version = "0.31", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+# Restores the terminal on SIGTERM/SIGHUP.
+signal-hook = { version = "0.3", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
-ratatui = "0.29"
+
+[dev-dependencies]
+# tests/boundaries.rs parses the source to check which layer uses which.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
+
+# All `unsafe` lives in src/platform, which allows it explicitly, and every
+# unsafe block needs a `SAFETY:` comment.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
